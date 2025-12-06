@@ -28,10 +28,14 @@ struct ContentView: View {
     
     // For selection mode
     @State private var isSelectionMode = false
-    @State private var selectedFolders = Set<String>()
+    @State private var selectedItems = Set<String>() // Changed from selectedFolders to selectedItems
     @State private var showMoveSheet = false
     @State private var showDeleteAlert = false
-    @State private var copiedFolderPath: String? = nil
+    @State private var copiedItemPath: String? = nil
+    
+    // For move functionality (single item)
+    @State private var showMoveItemSheet = false
+    @State private var itemToMove: String = ""
 
     var body: some View {
         NavigationView {
@@ -215,62 +219,216 @@ struct ContentView: View {
                         )
                     )
                     
-                    // List with transparent background
+                    // List with transparent background - show folders first, then files
                     List {
-                        ForEach(fileManager.folders, id: \..self) { folder in
-                            if isSelectionMode {
-                                // Selection mode row
-                                HStack {
-                                    Image(systemName: selectedFolders.contains(folder) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(selectedFolders.contains(folder) ? .blue : .gray)
-                                        .font(.title3)
-                                    Image(systemName: "folder.fill")
-                                        .foregroundColor(getFolderColor(for: folder))
-                                        .font(.title3)
-                                    Text(folder)
-                                        .foregroundColor(.black)
-                                        .font(.system(size: 17, weight: .medium, design: .rounded))
-                                    Spacer()
-                                }
-                                .padding(.vertical, 4)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    toggleSelection(folder)
-                                }
-                                .listRowBackground(Color.white.opacity(0.6))
-                            } else {
-                                // Normal mode row
-                                NavigationLink(destination: FolderView(path: folder)) {
-                                    HStack {
-                                        Image(systemName: "folder.fill")
-                                            .foregroundColor(getFolderColor(for: folder))
-                                            .font(.title3)
-                                        Text(folder)
-                                            .foregroundColor(.black)
-                                            .font(.system(size: 17, weight: .medium, design: .rounded))
-                                    }
-                                    .padding(.vertical, 4)
-                                }
-                                .listRowBackground(Color.white.opacity(0.6))
-                                .swipeActions {
-                                    // Delete
-                                    Button(role: .destructive) {
-                                        if let index = fileManager.folders.firstIndex(of: folder) {
-                                            fileManager.deleteFolder(at: IndexSet(integer: index))
+                        let contents = fileManager.getContents(of: "")
+                        let folders = contents.filter { fileManager.isFolder($0, at: "") }.sorted()
+                        let files = contents.filter { !fileManager.isFolder($0, at: "") }.sorted()
+                        
+                        // Folders section
+                        if !folders.isEmpty {
+                            Section {
+                                ForEach(folders, id: \.self) { item in
+                                    if isSelectionMode {
+                                        // Selection mode row
+                                        HStack {
+                                            Image(systemName: selectedItems.contains(item) ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(selectedItems.contains(item) ? .blue : .gray)
+                                                .font(.title3)
+                                            Image(systemName: "folder.fill")
+                                                .foregroundColor(getFolderColor(for: item))
+                                                .font(.title3)
+                                            Text(item)
+                                                .foregroundColor(.black)
+                                                .font(.system(size: 17, weight: .medium, design: .rounded))
+                                            Spacer()
                                         }
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
+                                        .padding(.vertical, 4)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            toggleSelection(item)
+                                        }
+                                        .listRowBackground(Color.white.opacity(0.6))
+                                    } else {
+                                        // Normal mode row - Folder
+                                        NavigationLink(destination: FolderView(path: item)) {
+                                            HStack {
+                                                Image(systemName: "folder.fill")
+                                                    .foregroundColor(getFolderColor(for: item))
+                                                    .font(.title3)
+                                                Text(item)
+                                                    .foregroundColor(.black)
+                                                    .font(.system(size: 17, weight: .medium, design: .rounded))
+                                            }
+                                            .padding(.vertical, 4)
+                                        }
+                                        .listRowBackground(Color.white.opacity(0.6))
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button(role: .destructive) {
+                                                let contents = fileManager.getContents(of: "")
+                                                if let index = contents.firstIndex(of: item) {
+                                                    fileManager.deleteItem(at: IndexSet(integer: index), in: "")
+                                                    fileManager.loadFolders()
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            
+                                            Button {
+                                                folderToRename = item
+                                                newFolderName = item
+                                                showRenameSheet = true
+                                            } label: {
+                                                Label("Rename", systemImage: "pencil")
+                                            }
+                                            .tint(.orange)
+                                        }
+                                        .contextMenu {
+                                            Button {
+                                                // Copy folder path to clipboard for copy operation
+                                                UIPasteboard.general.string = item
+                                                copiedItemPath = item
+                                            } label: {
+                                                Label("Copy", systemImage: "doc.on.doc")
+                                            }
+                                            Button {
+                                                // Set itemToMove first, then show sheet after a tiny delay to ensure state is updated
+                                                itemToMove = item
+                                                DispatchQueue.main.async {
+                                                    showMoveItemSheet = true
+                                                }
+                                            } label: {
+                                                Label("Move", systemImage: "folder")
+                                            }
+                                            Button {
+                                                let contents = fileManager.getContents(of: "")
+                                                if let idx = contents.firstIndex(of: item) {
+                                                    fileManager.deleteItem(at: IndexSet(integer: idx), in: "")
+                                                    fileManager.loadFolders()
+                                                    // Force refresh after deletion
+                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                                        fileManager.objectWillChange.send()
+                                                    }
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            Button {
+                                                folderToRename = item
+                                                newFolderName = item
+                                                showRenameSheet = true
+                                            } label: {
+                                                Label("Rename", systemImage: "pencil")
+                                            }
+                                        }
                                     }
-                                    // Rename
-                                    Button {
-                                        folderToRename = folder
-                                        newFolderName = folder // prefill old name
-                                        showRenameSheet = true
-                                    } label: {
-                                        Label("Rename", systemImage: "pencil")
-                                    }
-                                    .tint(.blue)
                                 }
+                            } header: {
+                                Text("Folders")
+                            }
+                        }
+                        
+                        // Files section
+                        if !files.isEmpty {
+                            Section {
+                                ForEach(files, id: \.self) { item in
+                                    if isSelectionMode {
+                                        // Selection mode row
+                                        HStack {
+                                            Image(systemName: selectedItems.contains(item) ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(selectedItems.contains(item) ? .blue : .gray)
+                                                .font(.title3)
+                                            // Show file icon
+                                            let fileIcon = getFileIcon(for: item)
+                                            Image(systemName: fileIcon.icon)
+                                                .foregroundColor(fileIcon.color)
+                                                .font(.title3)
+                                            Text(item)
+                                                .foregroundColor(.black)
+                                                .font(.system(size: 17, weight: .medium, design: .rounded))
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 4)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            toggleSelection(item)
+                                        }
+                                        .listRowBackground(Color.white.opacity(0.6))
+                                    } else {
+                                        // Normal mode row - File
+                                        let fileIcon = getFileIcon(for: item)
+                                        NavigationLink(destination: FileDetailView(filePath: item)) {
+                                            HStack {
+                                                Image(systemName: fileIcon.icon)
+                                                    .foregroundColor(fileIcon.color)
+                                                    .font(.title3)
+                                                Text(item)
+                                                    .foregroundColor(.black)
+                                                    .font(.system(size: 17, weight: .medium, design: .rounded))
+                                            }
+                                            .padding(.vertical, 4)
+                                        }
+                                        .listRowBackground(Color.white.opacity(0.6))
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button(role: .destructive) {
+                                                let contents = fileManager.getContents(of: "")
+                                                if let index = contents.firstIndex(of: item) {
+                                                    fileManager.deleteItem(at: IndexSet(integer: index), in: "")
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            
+                                            Button {
+                                                folderToRename = item
+                                                newFolderName = item
+                                                showRenameSheet = true
+                                            } label: {
+                                                Label("Rename", systemImage: "pencil")
+                                            }
+                                            .tint(.orange)
+                                        }
+                                        .contextMenu {
+                                            Button {
+                                                // Copy file path to clipboard for copy operation
+                                                UIPasteboard.general.string = item
+                                                copiedItemPath = item
+                                            } label: {
+                                                Label("Copy", systemImage: "doc.on.doc")
+                                            }
+                                            Button {
+                                                // Set itemToMove first, then show sheet after a tiny delay to ensure state is updated
+                                                itemToMove = item
+                                                DispatchQueue.main.async {
+                                                    showMoveItemSheet = true
+                                                }
+                                            } label: {
+                                                Label("Move", systemImage: "folder")
+                                            }
+                                            Button(role: .destructive) {
+                                                let contents = fileManager.getContents(of: "")
+                                                if let idx = contents.firstIndex(of: item) {
+                                                    fileManager.deleteItem(at: IndexSet(integer: idx), in: "")
+                                                    // Force refresh after deletion
+                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                                        fileManager.objectWillChange.send()
+                                                    }
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            Button {
+                                                folderToRename = item
+                                                newFolderName = item
+                                                showRenameSheet = true
+                                            } label: {
+                                                Label("Rename", systemImage: "pencil")
+                                            }
+                                        }
+                                    }
+                                }
+                            } header: {
+                                Text("Files")
                             }
                         }
                     }
@@ -286,7 +444,7 @@ struct ContentView: View {
                         // Cancel selection
                         Button("Cancel") {
                             isSelectionMode = false
-                            selectedFolders.removeAll()
+                            selectedItems.removeAll()
                         }
                         .foregroundColor(.blue)
                     } else {
@@ -328,10 +486,15 @@ struct ContentView: View {
                         // Paste button (if something is copied)
                         if let clipboardString = UIPasteboard.general.string,
                            !clipboardString.isEmpty,
-                           clipboardString.contains("/") {
+                           isValidPath(clipboardString) {
                             Menu {
                                 Button(action: {
-                                    pasteFolder(from: clipboardString)
+                                    // Read clipboard fresh when pasting to ensure we get the current value
+                                    if let currentClipboard = UIPasteboard.general.string,
+                                       !currentClipboard.isEmpty,
+                                       isValidPath(currentClipboard) {
+                                        pasteItem(from: currentClipboard)
+                                    }
                                 }) {
                                     Label("Paste", systemImage: "doc.on.clipboard")
                                 }
@@ -344,7 +507,7 @@ struct ContentView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if isSelectionMode && !selectedFolders.isEmpty {
+                if isSelectionMode && !selectedItems.isEmpty {
                     // Custom bottom action bar
                     HStack(spacing: 0) {
                         // Delete button
@@ -367,7 +530,7 @@ struct ContentView: View {
                         
                         // Copy button
                         Button(action: {
-                            copySelectedFolders()
+                            copySelectedItems()
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "doc.on.doc")
@@ -387,7 +550,7 @@ struct ContentView: View {
                         VStack(spacing: 4) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.title3)
-                            Text("\(selectedFolders.count) selected")
+                            Text("\(selectedItems.count) selected")
                                 .font(.caption)
                         }
                         .foregroundColor(.blue)
@@ -428,85 +591,235 @@ struct ContentView: View {
         .navigationViewStyle(.stack)
         .sheet(isPresented: $showRenameSheet) {
             RenameFolderView(oldName: folderToRename, newName: $newFolderName) {
-                // On rename completion
+                // On rename completion - handle both folders and files
                 fileManager.renameFolder(at: "", oldName: folderToRename, newName: newFolderName)
+                fileManager.loadFolders()
+                fileManager.objectWillChange.send()
             }
         }
-        // For moving selected folders
+        // For moving selected items
         .sheet(isPresented: $showMoveSheet) {
             BatchMoveView(
-                selectedItems: Array(selectedFolders),
+                selectedItems: Array(selectedItems),
                 currentPath: "",
                 onComplete: {
                     isSelectionMode = false
-                    selectedFolders.removeAll()
+                    selectedItems.removeAll()
                     fileManager.loadFolders()
+                    fileManager.objectWillChange.send()
+                }
+            )
+            .environmentObject(fileManager)
+        }
+        // For moving a single item
+        .sheet(isPresented: Binding(
+            get: { showMoveItemSheet && !itemToMove.isEmpty },
+            set: { showMoveItemSheet = $0 }
+        )) {
+            BatchMoveView(
+                selectedItems: [itemToMove],
+                currentPath: "",
+                onComplete: {
+                    itemToMove = ""
+                    showMoveItemSheet = false
+                    fileManager.loadFolders()
+                    fileManager.objectWillChange.send()
                 }
             )
             .environmentObject(fileManager)
         }
         // Delete confirmation alert
-        .alert("Delete Folders", isPresented: $showDeleteAlert) {
+        .alert("Delete Items", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
-                deleteSelectedFolders()
+                deleteSelectedItems()
             }
         } message: {
-            Text("Are you sure you want to delete \(selectedFolders.count) folder(s)? This action cannot be undone.")
+            Text("Are you sure you want to delete \(selectedItems.count) item(s)? This action cannot be undone.")
         }
     }
     
     // MARK: - Helper Functions
     
-    func toggleSelection(_ folder: String) {
-        if selectedFolders.contains(folder) {
-            selectedFolders.remove(folder)
-        } else {
-            selectedFolders.insert(folder)
+    // Check if clipboard string is a valid file/folder path
+    func isValidPath(_ pathString: String) -> Bool {
+        let systemFileManager = FileManager.default
+        guard let documentsURL = systemFileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
         }
-    }
-    
-    func deleteSelectedFolders() {
-        for folder in selectedFolders {
-            if let index = fileManager.folders.firstIndex(of: folder) {
-                fileManager.deleteFolder(at: IndexSet(integer: index))
+        
+        // Handle comma-separated paths (multiple items)
+        let paths = pathString.contains(",") ? pathString.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } : [pathString]
+        
+        // Check if at least one path exists
+        for pathItem in paths {
+            // Split the path by "/" and append each component properly
+            let pathComponents = pathItem.components(separatedBy: "/").filter { !$0.isEmpty }
+            var sourceURL = documentsURL
+            for component in pathComponents {
+                sourceURL = sourceURL.appendingPathComponent(component)
+            }
+            
+            if systemFileManager.fileExists(atPath: sourceURL.path) {
+                return true
             }
         }
-        selectedFolders.removeAll()
-        isSelectionMode = false
-        fileManager.loadFolders()
+        
+        return false
     }
     
-    func copySelectedFolders() {
-        // Copy all selected folders to clipboard (comma-separated paths)
-        let pathsToCopy = Array(selectedFolders)
+    // Get appropriate icon for file type with rainbow color
+    func getFileIcon(for fileName: String) -> (icon: String, color: Color) {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        let fileColor = getFolderColor(for: fileName) // Use rainbow color based on filename
+        
+        // PDF files
+        if ext == "pdf" {
+            return ("doc.richtext.fill", fileColor)
+        }
+        
+        // Image files
+        let imageExtensions = ["png", "jpg", "jpeg", "gif", "heic", "heif", "tiff", "tif", "bmp", "webp", "ico", "svg", "raw", "cr2", "nef", "orf", "sr2", "dng"]
+        if imageExtensions.contains(ext) {
+            return ("photo.fill", fileColor)
+        }
+        
+        // Audio files
+        if fileManager.isAudioFile(fileName) {
+            return ("music.note", fileColor)
+        }
+        
+        // Video files
+        if fileManager.isVideoFile(fileName) {
+            return ("film.fill", fileColor)
+        }
+        
+        // Microsoft Office documents
+        if ext == "doc" || ext == "docx" {
+            return ("doc.text.fill", fileColor)
+        }
+        if ext == "xls" || ext == "xlsx" {
+            return ("tablecells.fill", fileColor)
+        }
+        if ext == "ppt" || ext == "pptx" {
+            return ("rectangle.stack.fill", fileColor)
+        }
+        
+        // Text files
+        if ext == "txt" || ext == "rtf" || ext == "rtfd" {
+            return ("doc.plaintext.fill", fileColor)
+        }
+        
+        // Code files
+        let codeExtensions = ["swift", "js", "ts", "html", "htm", "css", "xml", "json", "py", "java", "cpp", "c", "h", "php", "rb", "go", "rs", "kt", "dart"]
+        if codeExtensions.contains(ext) {
+            return ("chevron.left.forwardslash.chevron.right", fileColor)
+        }
+        
+        // Archive files
+        let archiveExtensions = ["zip", "rar", "7z", "tar", "gz", "bz2"]
+        if archiveExtensions.contains(ext) {
+            return ("archivebox.fill", fileColor)
+        }
+        
+        // Spreadsheet/CSV
+        if ext == "csv" {
+            return ("tablecells.fill", fileColor)
+        }
+        
+        // Markdown
+        if ext == "md" || ext == "markdown" {
+            return ("doc.text.fill", fileColor)
+        }
+        
+        // Apple iWork files
+        if ext == "pages" {
+            return ("doc.text.fill", fileColor)
+        }
+        if ext == "numbers" {
+            return ("tablecells.fill", fileColor)
+        }
+        if ext == "key" {
+            return ("rectangle.stack.fill", fileColor)
+        }
+        
+        // Default document icon
+        return ("doc.fill", fileColor)
+    }
+    
+    func toggleSelection(_ item: String) {
+        if selectedItems.contains(item) {
+            selectedItems.remove(item)
+        } else {
+            selectedItems.insert(item)
+        }
+    }
+    
+    func deleteSelectedItems() {
+        let contents = fileManager.getContents(of: "")
+        var indicesToDelete = IndexSet()
+        
+        for item in selectedItems {
+            if let index = contents.firstIndex(of: item) {
+                indicesToDelete.insert(index)
+            }
+        }
+        
+        fileManager.deleteItem(at: indicesToDelete, in: "")
+        selectedItems.removeAll()
+        isSelectionMode = false
+        fileManager.loadFolders()
+        fileManager.objectWillChange.send()
+    }
+    
+    func copySelectedItems() {
+        // Copy all selected items to clipboard (comma-separated paths)
+        let pathsToCopy = Array(selectedItems)
         UIPasteboard.general.string = pathsToCopy.joined(separator: ",")
-        copiedFolderPath = pathsToCopy.first
+        copiedItemPath = pathsToCopy.first
         
         // Exit selection mode after copying
         isSelectionMode = false
-        selectedFolders.removeAll()
+        selectedItems.removeAll()
     }
     
-    func pasteFolder(from sourcePath: String) {
+    func pasteItem(from sourcePath: String) {
+        print("📋 Paste operation started with sourcePath: \(sourcePath)")
         let systemFileManager = FileManager.default
-        let documentsURL = systemFileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let documentsURL = systemFileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            print("❌ Failed to get documents directory")
+            return
+        }
         
         // Handle multiple items (comma-separated) or single item
         let paths = sourcePath.contains(",") ? sourcePath.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } : [sourcePath]
+        print("📋 Processing \(paths.count) item(s) to paste")
         
         var successCount = 0
+        var failedItems: [String] = []
         
         for sourcePathItem in paths {
-            let sourceURL = documentsURL.appendingPathComponent(sourcePathItem)
-            let folderName = sourceURL.lastPathComponent
-            let destinationURL = documentsURL.appendingPathComponent(folderName)
+            let trimmedPath = sourcePathItem.trimmingCharacters(in: .whitespaces)
+            if trimmedPath.isEmpty {
+                print("⚠️ Skipping empty path")
+                continue
+            }
             
-            // Check if source exists and is a directory
-            var isDirectory: ObjCBool = false
-            guard systemFileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
-                print("Source folder does not exist: \(sourcePathItem)")
+            // Split the path by "/" and append each component properly to get source URL
+            let pathComponents = trimmedPath.components(separatedBy: "/").filter { !$0.isEmpty }
+            var sourceURL = documentsURL
+            for component in pathComponents {
+                sourceURL = sourceURL.appendingPathComponent(component)
+            }
+            
+            let itemName = sourceURL.lastPathComponent
+            // For root, destination is just the item name
+            let destinationURL = documentsURL.appendingPathComponent(itemName)
+            
+            // Check if source exists
+            guard systemFileManager.fileExists(atPath: sourceURL.path) else {
+                print("❌ Source item does not exist: \(sourceURL.path)")
+                failedItems.append(trimmedPath)
                 continue
             }
             
@@ -515,21 +828,28 @@ struct ContentView: View {
                 var finalDestination = destinationURL
                 var counter = 1
                 while systemFileManager.fileExists(atPath: finalDestination.path) {
-                    let newName = "\(folderName) \(counter)"
+                    let nameWithoutExt = itemName.components(separatedBy: ".").dropLast().joined(separator: ".")
+                    let ext = itemName.components(separatedBy: ".").last ?? ""
+                    let newName = ext.isEmpty ? "\(itemName) \(counter)" : "\(nameWithoutExt) \(counter).\(ext)"
                     finalDestination = documentsURL.appendingPathComponent(newName)
                     counter += 1
                 }
                 
                 try systemFileManager.copyItem(at: sourceURL, to: finalDestination)
-                print("Pasted folder from \(sourcePathItem) to \(finalDestination.path)")
+                print("✅ Pasted item from \(trimmedPath) to \(finalDestination.lastPathComponent)")
                 successCount += 1
             } catch {
-                print("Failed to paste folder \(sourcePathItem): \(error)")
+                print("❌ Failed to paste item \(trimmedPath): \(error)")
+                failedItems.append(trimmedPath)
             }
         }
         
         if successCount > 0 {
+            print("✅ Successfully pasted \(successCount) item(s)")
             fileManager.loadFolders()
+            fileManager.objectWillChange.send()
+        } else if !failedItems.isEmpty {
+            print("❌ Failed to paste all items: \(failedItems)")
         }
     }
 }

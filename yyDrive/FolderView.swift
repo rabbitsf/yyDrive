@@ -292,9 +292,14 @@ struct FolderView: View {
                             // Paste button (if something is copied and looks like a file path)
                             if let clipboardString = UIPasteboard.general.string,
                                !clipboardString.isEmpty,
-                               clipboardString.contains("/") {
+                               isValidPath(clipboardString) {
                                 Button(action: {
-                                    pasteItem(from: clipboardString)
+                                    // Read clipboard fresh when pasting to ensure we get the current value
+                                    if let currentClipboard = UIPasteboard.general.string,
+                                       !currentClipboard.isEmpty,
+                                       isValidPath(currentClipboard) {
+                                        pasteItem(from: currentClipboard)
+                                    }
                                 }) {
                                     Label("Paste", systemImage: "doc.on.clipboard")
                                 }
@@ -468,16 +473,20 @@ struct FolderView: View {
                 .environmentObject(fileManager)
         }
         // For moving a single item
-        .sheet(isPresented: $showMoveItemSheet) {
-                BatchMoveView(
-                    selectedItems: [itemToMove],
-                    currentPath: path,
-                    onComplete: {
-                        itemToMove = ""
-                        fileManager.objectWillChange.send()
-                    }
-                )
-                .environmentObject(fileManager)
+        .sheet(isPresented: Binding(
+            get: { showMoveItemSheet && !itemToMove.isEmpty },
+            set: { showMoveItemSheet = $0 }
+        )) {
+            BatchMoveView(
+                selectedItems: [itemToMove],
+                currentPath: path,
+                onComplete: {
+                    itemToMove = ""
+                    showMoveItemSheet = false
+                    fileManager.objectWillChange.send()
+                }
+            )
+            .environmentObject(fileManager)
         }
         // Delete confirmation alert
         .alert("Delete Items", isPresented: $showDeleteAlert) {
@@ -514,23 +523,22 @@ struct FolderView: View {
     
     @ViewBuilder
     private var fileListView: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                let contents = fileManager.getContents(of: path)
-                ForEach(Array(contents.enumerated()), id: \.element) { index, item in
-                    if isSelectionMode {
-                        selectionModeRow(item: item, index: index, totalCount: contents.count)
-                    } else {
-                        normalModeRow(item: item, index: index, totalCount: contents.count)
-                    }
+        List {
+            let contents = fileManager.getContents(of: path)
+            ForEach(Array(contents.enumerated()), id: \.element) { index, item in
+                if isSelectionMode {
+                    selectionModeRow(item: item, index: index, totalCount: contents.count)
+                        .listRowBackground(Color.white.opacity(0.6))
+                        .listRowSeparator(.hidden)
+                } else {
+                    normalModeRow(item: item, index: index, totalCount: contents.count)
+                        .listRowBackground(Color.white.opacity(0.6))
+                        .listRowSeparator(.hidden)
                 }
             }
-            .background(Color.white.opacity(0.6))
-            .cornerRadius(16)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
         }
-        .background(Color.clear)
+        .scrollContentBackground(.hidden)
+        .listStyle(.plain)
         // Update when audio/video manager state changes to highlight playing items
         .onChange(of: audioManager.currentSongTitle) { _ in
             // Force view update
@@ -571,13 +579,11 @@ struct FolderView: View {
             
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onTapGesture {
             toggleSelection(item)
         }
-        .overlay(separatorOverlay(show: index < totalCount - 1))
     }
     
     @ViewBuilder
@@ -604,8 +610,7 @@ struct FolderView: View {
                     .foregroundColor(.gray)
                     .font(.caption)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 4)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
@@ -648,8 +653,11 @@ struct FolderView: View {
                 Label("Copy", systemImage: "doc.on.doc")
             }
             Button {
+                // Set itemToMove first, then show sheet after a tiny delay to ensure state is updated
                 itemToMove = item
-                showMoveItemSheet = true
+                DispatchQueue.main.async {
+                    showMoveItemSheet = true
+                }
             } label: {
                 Label("Move", systemImage: "folder")
             }
@@ -673,7 +681,6 @@ struct FolderView: View {
                 Label("Rename", systemImage: "pencil")
             }
         }
-        .overlay(separatorOverlay(show: index < totalCount - 1))
     }
     
     @ViewBuilder
@@ -709,8 +716,7 @@ struct FolderView: View {
                                 .font(.title3)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 4)
                     .background(isCurrentlyPlaying ? videoColor.opacity(0.2) : Color.clear)
                     .cornerRadius(8)
                 }
@@ -755,8 +761,11 @@ struct FolderView: View {
                         Label("Copy", systemImage: "doc.on.doc")
                     }
                     Button {
+                        // Set itemToMove first, then show sheet after a tiny delay to ensure state is updated
                         itemToMove = item
-                        showMoveItemSheet = true
+                        DispatchQueue.main.async {
+                            showMoveItemSheet = true
+                        }
                     } label: {
                         Label("Move", systemImage: "folder")
                     }
@@ -780,7 +789,6 @@ struct FolderView: View {
                         Label("Rename", systemImage: "pencil")
                     }
                 }
-                .overlay(separatorOverlay(show: index < totalCount - 1))
             } else if isAudio {
                 // Check if this is the currently playing song
                 let isCurrentlyPlaying = audioManager.currentSongTitle == item && audioManager.isPlaying
@@ -805,8 +813,7 @@ struct FolderView: View {
                                 .font(.title3)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 4)
                     .background(isCurrentlyPlaying ? audioColor.opacity(0.2) : Color.clear)
                     .cornerRadius(8)
                 }
@@ -850,8 +857,11 @@ struct FolderView: View {
                         Label("Copy", systemImage: "doc.on.doc")
                     }
                     Button {
+                        // Set itemToMove first, then show sheet after a tiny delay to ensure state is updated
                         itemToMove = item
-                        showMoveItemSheet = true
+                        DispatchQueue.main.async {
+                            showMoveItemSheet = true
+                        }
                     } label: {
                         Label("Move", systemImage: "folder")
                     }
@@ -874,7 +884,6 @@ struct FolderView: View {
                         Label("Rename", systemImage: "pencil")
                     }
                 }
-                .overlay(separatorOverlay(show: index < totalCount - 1))
             }
         } else {
             // For non-media files, use existing FileDetailView
@@ -892,8 +901,7 @@ struct FolderView: View {
                         .foregroundColor(.gray)
                         .font(.caption)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 4)
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
@@ -1126,23 +1134,79 @@ struct FolderView: View {
     }
     
     // MARK: - Paste Functionality
-    func pasteItem(from sourcePath: String) {
+    
+    // Check if clipboard string is a valid file/folder path
+    func isValidPath(_ pathString: String) -> Bool {
         let systemFileManager = FileManager.default
-        let documentsURL = systemFileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let documentsURL = systemFileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        
+        // Handle comma-separated paths (multiple items)
+        let paths = pathString.contains(",") ? pathString.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } : [pathString]
+        
+        // Check if at least one path exists
+        for pathItem in paths {
+            // Split the path by "/" and append each component properly
+            let pathComponents = pathItem.components(separatedBy: "/").filter { !$0.isEmpty }
+            var sourceURL = documentsURL
+            for component in pathComponents {
+                sourceURL = sourceURL.appendingPathComponent(component)
+            }
+            
+            if systemFileManager.fileExists(atPath: sourceURL.path) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    func pasteItem(from sourcePath: String) {
+        print("📋 Paste operation started with sourcePath: \(sourcePath), destination path: \(path)")
+        let systemFileManager = FileManager.default
+        guard let documentsURL = systemFileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            print("❌ Failed to get documents directory")
+            return
+        }
         
         // Handle multiple items (comma-separated) or single item
         let paths = sourcePath.contains(",") ? sourcePath.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } : [sourcePath]
+        print("📋 Processing \(paths.count) item(s) to paste")
         
         var successCount = 0
+        var failedItems: [String] = []
         
         for sourcePathItem in paths {
-            let sourceURL = documentsURL.appendingPathComponent(sourcePathItem)
+            let trimmedPath = sourcePathItem.trimmingCharacters(in: .whitespaces)
+            if trimmedPath.isEmpty {
+                print("⚠️ Skipping empty path")
+                continue
+            }
+            
+            // Split the path by "/" and append each component properly to get source URL
+            let pathComponents = trimmedPath.components(separatedBy: "/").filter { !$0.isEmpty }
+            var sourceURL = documentsURL
+            for component in pathComponents {
+                sourceURL = sourceURL.appendingPathComponent(component)
+            }
+            
             let fileName = sourceURL.lastPathComponent
-            let destinationURL = documentsURL.appendingPathComponent(path).appendingPathComponent(fileName)
+            
+            // Build destination URL - handle empty path (root) correctly
+            var destinationURL = documentsURL
+            if !path.isEmpty {
+                let destinationComponents = path.components(separatedBy: "/").filter { !$0.isEmpty }
+                for component in destinationComponents {
+                    destinationURL = destinationURL.appendingPathComponent(component)
+                }
+            }
+            destinationURL = destinationURL.appendingPathComponent(fileName)
             
             // Check if source exists
             guard systemFileManager.fileExists(atPath: sourceURL.path) else {
-                print("Source file does not exist: \(sourcePathItem)")
+                print("❌ Source file does not exist: \(sourceURL.path)")
+                failedItems.append(trimmedPath)
                 continue
             }
             
@@ -1154,24 +1218,37 @@ struct FolderView: View {
                     let nameWithoutExt = fileName.components(separatedBy: ".").dropLast().joined(separator: ".")
                     let ext = fileName.components(separatedBy: ".").last ?? ""
                     let newName = "\(nameWithoutExt) \(counter).\(ext)"
-                    finalDestination = documentsURL.appendingPathComponent(path).appendingPathComponent(newName)
+                    
+                    // Build destination URL with new name - handle empty path (root) correctly
+                    var newDestinationURL = documentsURL
+                    if !path.isEmpty {
+                        let destinationComponents = path.components(separatedBy: "/").filter { !$0.isEmpty }
+                        for component in destinationComponents {
+                            newDestinationURL = newDestinationURL.appendingPathComponent(component)
+                        }
+                    }
+                    finalDestination = newDestinationURL.appendingPathComponent(newName)
                     counter += 1
                 }
                 
                 try systemFileManager.copyItem(at: sourceURL, to: finalDestination)
-                print("Pasted item from \(sourcePathItem) to \(finalDestination.path)")
+                print("✅ Pasted item from \(trimmedPath) to \(finalDestination.lastPathComponent)")
                 successCount += 1
             } catch {
-                print("Failed to paste item \(sourcePathItem): \(error)")
+                print("❌ Failed to paste item \(trimmedPath): \(error)")
+                failedItems.append(trimmedPath)
             }
         }
         
         if successCount > 0 {
+            print("✅ Successfully pasted \(successCount) item(s)")
             // Refresh view using the FileManagerHelper environment object
             fileManager.objectWillChange.send()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 fileManager.objectWillChange.send()
             }
+        } else if !failedItems.isEmpty {
+            print("❌ Failed to paste all items: \(failedItems)")
         }
     }
 }

@@ -92,12 +92,55 @@ class FileManagerHelper: ObservableObject {
 
     // Move file from oldPath to newFolder
     func moveFile(from oldPath: String, to newFolder: String) {
+        print("📦 FileManagerHelper.moveFile called:")
+        print("   From: \(oldPath)")
+        print("   To: \(newFolder)")
+        
+        // Normalize paths for comparison
+        let normalizedOld = oldPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let normalizedNew = newFolder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        
+        // Validate: Can't move into the same location
+        if normalizedOld == normalizedNew {
+            print("❌ FileManagerHelper: Cannot move \(oldPath) to itself")
+            return
+        }
+        
+        // Check if the source is a folder
         let oldURL = baseURL.appendingPathComponent(oldPath)
+        var isSourceDir: ObjCBool = false
+        FileManager.default.fileExists(atPath: oldURL.path, isDirectory: &isSourceDir)
+        let isSourceFolder = isSourceDir.boolValue
+        
+        // Validate: Can't move a FOLDER into itself or into one of its subfolders
+        // (Files can be moved into subfolders, but folders cannot)
+        if isSourceFolder && normalizedNew.hasPrefix(normalizedOld + "/") {
+            print("❌ FileManagerHelper: Cannot move folder \(oldPath) into \(newFolder) - would create circular reference")
+            print("   normalizedOld: '\(normalizedOld)'")
+            print("   normalizedNew: '\(normalizedNew)'")
+            print("   Check: '\(normalizedNew)'.hasPrefix('\(normalizedOld)/') = \(normalizedNew.hasPrefix(normalizedOld + "/"))")
+            return
+        }
+        
         let newURL = baseURL.appendingPathComponent(newFolder).appendingPathComponent(oldURL.lastPathComponent)
+        
+        print("   Final destination: \(newURL.path)")
+        
+        // Final safety check: ensure the destination doesn't contain the source (only for folders)
+        if isSourceFolder {
+            let finalDestinationPath = newURL.path
+            let sourcePath = oldURL.path
+            if finalDestinationPath.hasPrefix(sourcePath + "/") {
+                print("❌ FileManagerHelper: Final safety check failed - destination contains source")
+                return
+            }
+        }
+        
         do {
             try FileManager.default.moveItem(at: oldURL, to: newURL)
+            print("✅ Successfully moved \(isSourceFolder ? "folder" : "file")")
         } catch {
-            print("Failed to move file: \(error)")
+            print("❌ Failed to move file: \(error)")
         }
     }
 
